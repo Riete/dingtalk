@@ -1,0 +1,2 @@
+# github.com/riete/requests v1.0.3
+github.com/riete/requests
