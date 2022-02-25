@@ -5,8 +5,8 @@ import (
 )
 
 func TestSender(t *testing.T) {
-	url := "xxx"
-	secret := "xxx"
-	SendDingTalkText("test", "test", url, secret, false)
-	SendDingTalkMarkdown("test", "test", url, secret, false)
+	dt := NewDingTalk("xxx", "xxx")
+	dt.SendText("xxx", "xx", false, "xxx")
+	dt.SendMarkdown("xxx", "xx", false, "xxx")
+
 }

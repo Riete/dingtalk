@@ -1,2 +1,3 @@
-# github.com/riete/requests v1.0.3
+# github.com/riete/requests v1.0.6
+## explicit; go 1.17
 github.com/riete/requests

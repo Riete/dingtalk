@@ -46,15 +46,7 @@ func NewRequest(config *Config) *Request {
 	r := &Request{}
 	r.Client = &http.Client{}
 	r.Req, _ = http.NewRequest("", "", nil)
-	if config == nil {
-		config = DefaultConfig
-	}
-	r.SetTimeout(config.Timeout)
-	r.SetHeader(config.Headers)
-	r.SetProxy(config.Proxy)
-	if config.SkipTLSVerify {
-		r.SkipTLSVerify()
-	}
+	r.init(config)
 	return r
 }
 
@@ -62,6 +54,17 @@ func NewSession(config *Config) *Request {
 	r := NewRequest(config)
 	r.Client.Jar, _ = cookiejar.New(nil)
 	return r
+}
+
+func (r *Request) init(config *Config) {
+	if config == nil {
+		config = DefaultConfig
+	}
+	r.SetHeader(config.Headers)
+	r.SetTimeout(config.Timeout)
+	if config.SkipTLSVerify {
+		r.SkipTLSVerify()
+	}
 }
 
 func (r *Request) SetHeader(headers map[string]string) {
@@ -88,7 +91,6 @@ func (r *Request) SkipTLSVerify() {
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
-			DualStack: true,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -115,7 +117,7 @@ func (r *Request) ParseUrl(originUrl string) error {
 	}
 }
 
-func (r *Request) Do() error {
+func (r *Request) do() error {
 	resp, err := r.Client.Do(r.Req)
 	if err != nil {
 		return err
@@ -142,7 +144,7 @@ func (r *Request) Get(originUrl string, params map[string]string) error {
 		p.Add(k, v)
 	}
 	r.Req.URL.RawQuery = p.Encode()
-	return r.Do()
+	return r.do()
 }
 
 func (r *Request) Post(originUrl string, data map[string]interface{}) error {
@@ -156,7 +158,7 @@ func (r *Request) Post(originUrl string, data map[string]interface{}) error {
 	}
 	r.Req.Header.Set("Content-Type", ContentTypeJson)
 	r.Req.Body = ioutil.NopCloser(bytes.NewBuffer(jsonStr))
-	return r.Do()
+	return r.do()
 }
 
 func (r *Request) PostForm(originUrl string, data map[string]string) error {
@@ -170,7 +172,7 @@ func (r *Request) PostForm(originUrl string, data map[string]string) error {
 		formData.Add(k, v)
 	}
 	r.Req.Body = ioutil.NopCloser(strings.NewReader(formData.Encode()))
-	return r.Do()
+	return r.do()
 }
 
 func (r *Request) Put(originUrl string, data map[string]interface{}) error {
@@ -181,7 +183,7 @@ func (r *Request) Put(originUrl string, data map[string]interface{}) error {
 	jsonStr, _ := json.Marshal(data)
 	r.Req.Header.Set("Content-Type", ContentTypeJson)
 	r.Req.Body = ioutil.NopCloser(bytes.NewBuffer(jsonStr))
-	return r.Do()
+	return r.do()
 }
 
 func (r *Request) Delete(originUrl string) error {
@@ -189,5 +191,31 @@ func (r *Request) Delete(originUrl string) error {
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
 	}
-	return r.Do()
+	return r.do()
+}
+
+var defaultReq = NewRequest(DefaultConfig)
+
+func Session() *Request {
+	return NewSession(DefaultConfig)
+}
+
+func Get(originUrl string, params map[string]string) (*Request, error) {
+	return defaultReq, defaultReq.Get(originUrl, params)
+}
+
+func Post(originUrl string, data map[string]interface{}) (*Request, error) {
+	return defaultReq, defaultReq.Post(originUrl, data)
+}
+
+func PostForm(originUrl string, data map[string]string) (*Request, error) {
+	return defaultReq, defaultReq.PostForm(originUrl, data)
+}
+
+func Put(originUrl string, data map[string]interface{}) (*Request, error) {
+	return defaultReq, defaultReq.Put(originUrl, data)
+}
+
+func Delete(originUrl string) (*Request, error) {
+	return defaultReq, defaultReq.Delete(originUrl)
 }
