@@ -75,7 +75,7 @@ func (dt *dingtalk) send(body map[string]interface{}) string {
 	if r, err := requests.Post(dt.signedUrl, body); err != nil {
 		return err.Error()
 	} else {
-		return r.Content
+		return r.ContentToString()
 	}
 }
 

@@ -2,3 +2,5 @@ github.com/riete/requests v1.0.3 h1:A/WWtQJ5RNTsxZs+pIgnoXIdVZhdpzHo9aof4ZQqKIc=
 github.com/riete/requests v1.0.3/go.mod h1:+3dkH6BzCtt3s2r9aLCp/imlWiEjRpJCsdSXFqk7A1g=
 github.com/riete/requests v1.0.6 h1:hRglBddxHpXIPiB+F/gDfH6C0KGRoMSBbz8XYfOtDvY=
 github.com/riete/requests v1.0.6/go.mod h1:UxeqYs1WndwUCNY3PEY0xpEa0uS0y5o/Is9zYWy/35c=
+github.com/riete/requests v1.1.0 h1:YCew3ik/JuvkMpUHgjfdvrZEEsKLIuIxQDCaZ4TijHc=
+github.com/riete/requests v1.1.0/go.mod h1:UxeqYs1WndwUCNY3PEY0xpEa0uS0y5o/Is9zYWy/35c=

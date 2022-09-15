@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -28,7 +30,7 @@ type Request struct {
 	Req        *http.Request
 	Client     *http.Client
 	Resp       *http.Response
-	Content    string
+	Content    []byte
 	StatusCode int
 	Status     string
 }
@@ -126,12 +128,8 @@ func (r *Request) do() error {
 	r.StatusCode = resp.StatusCode
 	r.Status = resp.Status
 	defer r.Resp.Body.Close()
-	body, err := ioutil.ReadAll(r.Resp.Body)
-	if err != nil {
-		return err
-	}
-	r.Content = string(body)
-	return nil
+	r.Content, err = ioutil.ReadAll(r.Resp.Body)
+	return err
 }
 
 func (r *Request) Get(originUrl string, params map[string]string) error {
@@ -194,6 +192,32 @@ func (r *Request) Delete(originUrl string) error {
 	return r.do()
 }
 
+func (r *Request) Download(filePath, originUrl string) error {
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	r.Req.Method = HttpGet
+	if err := r.ParseUrl(originUrl); err != nil {
+		return err
+	}
+	resp, err := r.Client.Do(r.Req)
+	if err != nil {
+		return err
+	}
+	r.Resp = resp
+	r.StatusCode = resp.StatusCode
+	r.Status = resp.Status
+	defer r.Resp.Body.Close()
+	_, err = io.Copy(f, r.Resp.Body)
+	return err
+}
+
+func (r Request) ContentToString() string {
+	return *(*string)(unsafe.Pointer(&r.Content))
+}
+
 var defaultReq = NewRequest(DefaultConfig)
 
 func Session() *Request {
@@ -218,4 +242,8 @@ func Put(originUrl string, data map[string]interface{}) (*Request, error) {
 
 func Delete(originUrl string) (*Request, error) {
 	return defaultReq, defaultReq.Delete(originUrl)
+}
+
+func Download(filepath, originUrl string) (*Request, error) {
+	return defaultReq, defaultReq.Download(filepath, originUrl)
 }
