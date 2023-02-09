@@ -1,6 +1,10 @@
+github.com/juju/ratelimit v1.0.2 h1:sRxmtRiajbvrcLQT7S+JbqU0ntsb9W2yhSdNN8tWfaI=
+github.com/juju/ratelimit v1.0.2/go.mod h1:qapgC/Gy+xNh9UxzV13HGGl/6UXNN+ct+vwSgWNm/qk=
 github.com/riete/requests v1.0.3 h1:A/WWtQJ5RNTsxZs+pIgnoXIdVZhdpzHo9aof4ZQqKIc=
 github.com/riete/requests v1.0.3/go.mod h1:+3dkH6BzCtt3s2r9aLCp/imlWiEjRpJCsdSXFqk7A1g=
 github.com/riete/requests v1.0.6 h1:hRglBddxHpXIPiB+F/gDfH6C0KGRoMSBbz8XYfOtDvY=
 github.com/riete/requests v1.0.6/go.mod h1:UxeqYs1WndwUCNY3PEY0xpEa0uS0y5o/Is9zYWy/35c=
 github.com/riete/requests v1.1.0 h1:YCew3ik/JuvkMpUHgjfdvrZEEsKLIuIxQDCaZ4TijHc=
 github.com/riete/requests v1.1.0/go.mod h1:UxeqYs1WndwUCNY3PEY0xpEa0uS0y5o/Is9zYWy/35c=
+github.com/riete/requests v1.1.3 h1:5AJaf4QHLUUlSgKC+Y4NJ8aNuY9ZzX2Rb0SJCAaoP3Y=
+github.com/riete/requests v1.1.3/go.mod h1:viShCouisNAFtKHL9+9CsAVLvvzR8R7l0Bs1eKEyxSI=

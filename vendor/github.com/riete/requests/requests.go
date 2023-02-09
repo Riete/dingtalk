@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unsafe"
+
+	"github.com/juju/ratelimit"
 )
 
 const (
@@ -42,8 +44,6 @@ type Config struct {
 	Timeout       time.Duration
 }
 
-var DefaultConfig = &Config{Timeout: 10 * time.Second}
-
 func NewRequest(config *Config) *Request {
 	r := &Request{}
 	r.Client = &http.Client{}
@@ -60,9 +60,10 @@ func NewSession(config *Config) *Request {
 
 func (r *Request) init(config *Config) {
 	if config == nil {
-		config = DefaultConfig
+		config = &Config{Timeout: 10 * time.Second}
 	}
 	r.SetHeader(config.Headers)
+	r.SetProxy(config.Proxy)
 	r.SetTimeout(config.Timeout)
 	if config.SkipTLSVerify {
 		r.SkipTLSVerify()
@@ -192,12 +193,7 @@ func (r *Request) Delete(originUrl string) error {
 	return r.do()
 }
 
-func (r *Request) Download(filePath, originUrl string) error {
-	f, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+func (r *Request) download(originUrl string, w io.Writer) error {
 	r.Req.Method = HttpGet
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
@@ -210,18 +206,41 @@ func (r *Request) Download(filePath, originUrl string) error {
 	r.StatusCode = resp.StatusCode
 	r.Status = resp.Status
 	defer r.Resp.Body.Close()
-	_, err = io.Copy(f, r.Resp.Body)
+	_, err = io.Copy(w, r.Resp.Body)
 	return err
+}
+
+func (r *Request) Download(filePath, originUrl string) error {
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return r.download(originUrl, f)
+}
+
+func (r *Request) DownloadWithRateLimit(filePath, originUrl string, rate int64) error {
+	if rate <= 0 {
+		return r.Download(filePath, originUrl)
+	}
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	bucket := ratelimit.NewBucketWithRate(float64(rate), rate)
+	w := ratelimit.Writer(f, bucket)
+	return r.download(originUrl, w)
 }
 
 func (r Request) ContentToString() string {
 	return *(*string)(unsafe.Pointer(&r.Content))
 }
 
-var defaultReq = NewRequest(DefaultConfig)
+var defaultReq = NewRequest(nil)
 
 func Session() *Request {
-	return NewSession(DefaultConfig)
+	return NewSession(nil)
 }
 
 func Get(originUrl string, params map[string]string) (*Request, error) {
@@ -246,4 +265,8 @@ func Delete(originUrl string) (*Request, error) {
 
 func Download(filepath, originUrl string) (*Request, error) {
 	return defaultReq, defaultReq.Download(filepath, originUrl)
+}
+
+func DownloadWithRateLimit(filepath, originUrl string, rate int64) (*Request, error) {
+	return defaultReq, defaultReq.DownloadWithRateLimit(filepath, originUrl, rate)
 }
