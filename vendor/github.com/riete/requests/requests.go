@@ -6,106 +6,120 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"net"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/juju/ratelimit"
+	"golang.org/x/net/http/httpproxy"
 )
 
 const (
-	ContentTypeJson string = "application/json;charset=utf-8"
-	ContentTypeForm string = "application/x-www-form-urlencoded"
-	HttpGet         string = "GET"
-	HttpPost        string = "POST"
-	HttpPut         string = "PUT"
-	HttpDelete      string = "DELETE"
+	ContentTypeJson = "application/json;charset=utf-8"
+	ContentTypeForm = "application/x-www-form-urlencoded"
+	ProxyHttp       = "http"
+	ProxySocks      = "socks5"
 )
 
+type Proxy map[string]string
+
+func newProxy(prefix, proxy string) Proxy {
+	p := prefix + "://" + proxy
+	return Proxy{"http_proxy": p, "https_proxy": p}
+}
+
+func NewHttpProxy(proxy string) Proxy {
+	return newProxy(ProxyHttp, proxy)
+}
+
+func NewSocksProxy(proxy string) Proxy {
+	return newProxy(ProxySocks, proxy)
+}
+
+func newProxyWithAuth(prefix, proxy, username, password string) Proxy {
+	auth := url.QueryEscape(username) + ":" + url.QueryEscape(password)
+	p := prefix + "://" + auth + "@" + proxy
+	return Proxy{"http_proxy": p, "https_proxy": p}
+}
+
+func NewHttpProxyWithAuth(proxy, username, password string) Proxy {
+	return newProxyWithAuth(ProxyHttp, proxy, username, password)
+}
+
+func NewSocksProxyWithAuth(proxy, username, password string) Proxy {
+	return newProxyWithAuth(ProxySocks, proxy, username, password)
+}
+
+// ProxyFromEnvironment read proxy form env for every request
+// http.ProxyFromEnvironment read only once
+func ProxyFromEnvironment(req *http.Request) (*url.URL, error) {
+	return httpproxy.FromEnvironment().ProxyFunc()(req.URL)
+}
+
+// DefaultTransport is clone of http.DefaultTransport
+var DefaultTransport = http.DefaultTransport.(*http.Transport).Clone()
+
+var DefaultClient = &http.Client{Transport: DefaultTransport}
+
+func NewDefaultTransport() *http.Transport {
+	return http.DefaultTransport.(*http.Transport).Clone()
+}
+
+func NewDefaultClient() *http.Client {
+	return &http.Client{Transport: NewDefaultTransport()}
+}
+
 type Request struct {
-	Req        *http.Request
-	Client     *http.Client
-	Resp       *http.Response
-	Content    []byte
-	StatusCode int
-	Status     string
+	req     *http.Request
+	client  *http.Client
+	resp    *http.Response
+	content []byte
 }
 
-type Config struct {
-	Headers       map[string]string
-	Proxy         map[string]string
-	SkipTLSVerify bool
-	Timeout       time.Duration
-}
-
-func NewRequest(config *Config) *Request {
-	r := &Request{}
-	r.Client = &http.Client{}
-	r.Req, _ = http.NewRequest("", "", nil)
-	r.init(config)
-	return r
-}
-
-func NewSession(config *Config) *Request {
-	r := NewRequest(config)
-	r.Client.Jar, _ = cookiejar.New(nil)
-	return r
-}
-
-func (r *Request) init(config *Config) {
-	if config == nil {
-		config = &Config{Timeout: 10 * time.Second}
-	}
-	r.SetHeader(config.Headers)
-	r.SetProxy(config.Proxy)
-	r.SetTimeout(config.Timeout)
-	if config.SkipTLSVerify {
-		r.SkipTLSVerify()
-	}
-}
-
-func (r *Request) SetHeader(headers map[string]string) {
-	for k, v := range headers {
-		r.Req.Header.Set(k, v)
+func (r *Request) SetHeader(header map[string]string) {
+	for k, v := range header {
+		r.req.Header.Set(k, v)
 	}
 }
 
 func (r *Request) SetBasicAuth(username, password string) {
-	r.Req.SetBasicAuth(username, password)
+	r.req.SetBasicAuth(username, password)
 }
 
 func (r *Request) SetBearerTokenAuth(token string) {
-	r.Req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	r.req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 }
 
 func (r *Request) SetTimeout(t time.Duration) {
-	r.Client.Timeout = t
+	r.client.Timeout = t
+}
+
+func (r *Request) SetTransport(rt http.RoundTripper) {
+	r.client.Transport = rt
+}
+
+func (r *Request) SetClient(client *http.Client) {
+	r.client = client
 }
 
 func (r *Request) SkipTLSVerify() {
-	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-	}
-	r.Client.Transport = tr
+	r.client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 }
 
-func (r Request) SetProxy(proxy map[string]string) {
+func (r *Request) UnsetProxy() {
+	_ = os.Unsetenv("HTTP_PROXY")
+	_ = os.Unsetenv("http_proxy")
+	_ = os.Unsetenv("HTTPS_PROXY")
+	_ = os.Unsetenv("https_proxy")
+}
+
+func (r *Request) SetProxy(proxy Proxy) {
 	for k, v := range proxy {
 		_ = os.Setenv(k, v)
 	}
@@ -115,26 +129,44 @@ func (r *Request) ParseUrl(originUrl string) error {
 	if sendUrl, err := url.Parse(originUrl); err != nil {
 		return err
 	} else {
-		r.Req.URL = sendUrl
+		r.req.URL = sendUrl
 		return nil
 	}
 }
 
 func (r *Request) do() error {
-	resp, err := r.Client.Do(r.Req)
+	resp, err := r.client.Do(r.req)
 	if err != nil {
 		return err
 	}
-	r.Resp = resp
-	r.StatusCode = resp.StatusCode
-	r.Status = resp.Status
-	defer r.Resp.Body.Close()
-	r.Content, err = ioutil.ReadAll(r.Resp.Body)
+	r.resp = resp
+	defer r.resp.Body.Close()
+	r.content, err = io.ReadAll(r.resp.Body)
 	return err
 }
 
+func (r Request) Content() []byte {
+	return r.content
+}
+
+func (r Request) ContentToString() string {
+	return *(*string)(unsafe.Pointer(&r.content))
+}
+
+func (r Request) Status() (int, string) {
+	return r.resp.StatusCode, r.resp.Status
+}
+
+func (r Request) Response() *http.Response {
+	return r.resp
+}
+
+func (r Request) Request() *http.Request {
+	return r.req
+}
+
 func (r *Request) Get(originUrl string, params map[string]string) error {
-	r.Req.Method = HttpGet
+	r.req.Method = http.MethodGet
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
 	}
@@ -142,12 +174,12 @@ func (r *Request) Get(originUrl string, params map[string]string) error {
 	for k, v := range params {
 		p.Add(k, v)
 	}
-	r.Req.URL.RawQuery = p.Encode()
+	r.req.URL.RawQuery = p.Encode()
 	return r.do()
 }
 
 func (r *Request) Post(originUrl string, data map[string]interface{}) error {
-	r.Req.Method = HttpPost
+	r.req.Method = http.MethodPost
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
 	}
@@ -155,58 +187,59 @@ func (r *Request) Post(originUrl string, data map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	r.Req.Header.Set("Content-Type", ContentTypeJson)
-	r.Req.Body = ioutil.NopCloser(bytes.NewBuffer(jsonStr))
+	r.req.Header.Set("Content-Type", ContentTypeJson)
+	r.req.Body = io.NopCloser(bytes.NewBuffer(jsonStr))
 	return r.do()
 }
 
 func (r *Request) PostForm(originUrl string, data map[string]string) error {
-	r.Req.Method = HttpPost
+	r.req.Method = http.MethodPost
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
 	}
-	r.Req.Header.Set("Content-Type", ContentTypeForm)
+	r.req.Header.Set("Content-Type", ContentTypeForm)
 	formData := url.Values{}
 	for k, v := range data {
 		formData.Add(k, v)
 	}
-	r.Req.Body = ioutil.NopCloser(strings.NewReader(formData.Encode()))
+	r.req.Body = io.NopCloser(strings.NewReader(formData.Encode()))
 	return r.do()
 }
 
 func (r *Request) Put(originUrl string, data map[string]interface{}) error {
-	r.Req.Method = HttpPut
+	r.req.Method = http.MethodPut
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
 	}
 	jsonStr, _ := json.Marshal(data)
-	r.Req.Header.Set("Content-Type", ContentTypeJson)
-	r.Req.Body = ioutil.NopCloser(bytes.NewBuffer(jsonStr))
+	r.req.Header.Set("Content-Type", ContentTypeJson)
+	r.req.Body = io.NopCloser(bytes.NewBuffer(jsonStr))
 	return r.do()
 }
 
-func (r *Request) Delete(originUrl string) error {
-	r.Req.Method = HttpDelete
+func (r *Request) Delete(originUrl string, data map[string]interface{}) error {
+	r.req.Method = http.MethodDelete
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
 	}
+	jsonStr, _ := json.Marshal(data)
+	r.req.Header.Set("Content-Type", ContentTypeJson)
+	r.req.Body = io.NopCloser(bytes.NewBuffer(jsonStr))
 	return r.do()
 }
 
 func (r *Request) download(originUrl string, w io.Writer) error {
-	r.Req.Method = HttpGet
+	r.req.Method = http.MethodGet
 	if err := r.ParseUrl(originUrl); err != nil {
 		return err
 	}
-	resp, err := r.Client.Do(r.Req)
+	resp, err := r.client.Do(r.req)
 	if err != nil {
 		return err
 	}
-	r.Resp = resp
-	r.StatusCode = resp.StatusCode
-	r.Status = resp.Status
-	defer r.Resp.Body.Close()
-	_, err = io.Copy(w, r.Resp.Body)
+	r.resp = resp
+	defer r.resp.Body.Close()
+	_, err = io.Copy(w, r.resp.Body)
 	return err
 }
 
@@ -233,40 +266,65 @@ func (r *Request) DownloadWithRateLimit(filePath, originUrl string, rate int64) 
 	return r.download(originUrl, w)
 }
 
-func (r Request) ContentToString() string {
-	return *(*string)(unsafe.Pointer(&r.Content))
+func (r *Request) Upload(originUrl string, data map[string]string, filePaths ...string) error {
+	r.req.Method = http.MethodPost
+	if err := r.ParseUrl(originUrl); err != nil {
+		return err
+	}
+
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	for k, v := range data {
+		if err := w.WriteField(k, v); err != nil {
+			return err
+		}
+	}
+
+	var fileCloser []io.Closer
+	defer func() {
+		for _, f := range fileCloser {
+			_ = f.Close()
+		}
+	}()
+
+	for _, fp := range filePaths {
+		f, err := os.Open(fp)
+		if err != nil {
+			return err
+		}
+		fileCloser = append(fileCloser, f)
+
+		writer, err := w.CreateFormFile("file", filepath.Base(fp))
+		if err != nil {
+			return err
+		}
+
+		_, err = io.Copy(writer, f)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	r.req.Header.Set("Content-Type", w.FormDataContentType())
+	r.req.Body = io.NopCloser(body)
+	return r.do()
 }
 
-var defaultReq = NewRequest(nil)
-
-func Session() *Request {
-	return NewSession(nil)
+func NewRequest(options ...Option) *Request {
+	r := &Request{client: DefaultClient}
+	r.req, _ = http.NewRequest("", "", nil)
+	for _, option := range options {
+		option(r)
+	}
+	return r
 }
 
-func Get(originUrl string, params map[string]string) (*Request, error) {
-	return defaultReq, defaultReq.Get(originUrl, params)
-}
-
-func Post(originUrl string, data map[string]interface{}) (*Request, error) {
-	return defaultReq, defaultReq.Post(originUrl, data)
-}
-
-func PostForm(originUrl string, data map[string]string) (*Request, error) {
-	return defaultReq, defaultReq.PostForm(originUrl, data)
-}
-
-func Put(originUrl string, data map[string]interface{}) (*Request, error) {
-	return defaultReq, defaultReq.Put(originUrl, data)
-}
-
-func Delete(originUrl string) (*Request, error) {
-	return defaultReq, defaultReq.Delete(originUrl)
-}
-
-func Download(filepath, originUrl string) (*Request, error) {
-	return defaultReq, defaultReq.Download(filepath, originUrl)
-}
-
-func DownloadWithRateLimit(filepath, originUrl string, rate int64) (*Request, error) {
-	return defaultReq, defaultReq.DownloadWithRateLimit(filepath, originUrl, rate)
+func NewSession(options ...Option) *Request {
+	r := NewRequest(options...)
+	r.client.Jar, _ = cookiejar.New(nil)
+	return r
 }

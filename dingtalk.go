@@ -72,7 +72,8 @@ func (dt dingtalk) formatText(title, message string, isAtAll bool, atMobiles ...
 
 func (dt *dingtalk) send(body map[string]interface{}) string {
 	dt.sign()
-	if r, err := requests.Post(dt.signedUrl, body); err != nil {
+	r := requests.NewRequest(requests.WithTimeout(5 * time.Second))
+	if err := r.Post(dt.signedUrl, body); err != nil {
 		return err.Error()
 	} else {
 		return r.ContentToString()
