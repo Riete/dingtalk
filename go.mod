@@ -1,8 +1,9 @@
 module github.com/riete/dingtalk
 
-go 1.21.1
+go 1.21
 
-require github.com/riete/requests v1.2.10
+
+require github.com/riete/requests v1.2.11
 
 require (
 	github.com/juju/ratelimit v1.0.2 // indirect
